@@ -16,12 +16,12 @@ public class SRSender {
 	private static final int DEFAULT_DES_PORT = 2072;
 	private static final int DEFAULT_COUNTER_BOUND = 2;//2 time unit
 	private static final int HEADER_SIZE = 5;
-	private static final int WINDOW_SIZE = 10;
-	private static final int MAX_SEQ = 4;
+	private static final int WINDOW_SIZE = 4;
+	private static final int MAX_SEQ = 10;
 	private static final int DEFAULT_ID = 1;
 
 	//Public Method
-	public boolean transmit(){//transmit as much packet as possible
+	public boolean transmit() throws IOException{//transmit as much packet as possible
 		//check if data is all sent and acked
 		if ( sendIndex >= dataSent.length && window.size() ==0 ){
 			return true;
@@ -60,7 +60,12 @@ public class SRSender {
 		return false;
 	}
 
-	public int receivePacket( DatagramSocket receivedPacket ){//receive one data packet(ack)
+	public int receivePacket( DatagramPacket receivedPacket ){//receive one data packet(ack)
+		//check 
+		if ( receivedPacket == null ){
+			return 0;
+		}
+		
 		byte [] receiveBuffer = new byte[packetSize];
 		receiveBuffer = receivedPacket.getData();
 		int incomingSeq  =0, i=0;
@@ -113,7 +118,7 @@ public class SRSender {
 		return ;
 	}
 
-	public void timoutCheckAndRetransmit(){//initiating retransmit if necessary
+	public void timeoutCheckAndRetransmit() throws IOException{//initiating retransmit if necessary
 		//check time out
 		for ( int j=0; j<window.size(); j++ ){
 			if (window.get(j).counter > DEFAULT_COUNTER_BOUND && window.get(j).acked == false){//retransmit this packet
@@ -123,6 +128,10 @@ public class SRSender {
 		}
 		return;
 	}
+
+	public void terminate(){
+		sender.close();
+	}	
 
 	//Constructor
 	public SRSender() throws UnknownHostException, SocketException {
@@ -195,7 +204,7 @@ public class SRSender {
 	}
 	
 	private void pushEntry(int a, int b){//push a new entry to window
-		window.add(new WindowEntry(a, b, currentSeqN());
+		window.add(new WindowEntry(a, b, currentSeqN()));
 	}
 
 	private int reTransmit( int index ) throws IOException{//index indicates the entry in current window that needs to be retransmitted
@@ -238,7 +247,7 @@ public class SRSender {
 	}
 
 	private int currentSeqN(){
-
+		
 	}
 
 	//Private Variable
