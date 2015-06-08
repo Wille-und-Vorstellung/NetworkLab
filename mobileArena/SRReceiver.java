@@ -26,18 +26,22 @@ public class SRReceiver {
 	public boolean startReceive( DatagramPacket receivedPacket ) throws IOException{
 		//check
 		if ( receivedPacket == null ){
+			System.out.println("SRReceiver "+ID+" > "+"error(startReceive): null packet.");
 			return false;
 		}
+		
 		
 		byte[] tempBuffer = new byte[packetSize];
 		int ack = 0;
 		int dataSize = 0;
 		tempBuffer = receivedPacket.getData();
 		//check whether the incoming packet is a data packet and whether have the correct senderID
-		if ( dataReady ){
+		if ( isReady() ){
+			System.out.println("SRReceiver "+ID+" > "+"warning(startReceive): receive has complete.");
 			return false;
 		}
 		else if ( tempBuffer[3] != senderID || tempBuffer[0] != 'D' ){
+			System.out.println("SRReceiver "+ID+" > "+"warning(startReceive): not data packet or wrong senderID: "+tempBuffer[3]);
 			return false;
 		}
 		ack = tempBuffer[4];
@@ -45,26 +49,37 @@ public class SRReceiver {
 		//sequence number check
 		if (ack < expectedSEQ){
 			sendACK( ack );
+			System.out.println("SRReceiver "+ID+" > "+"warning(startReceive):incomingSEQ < expectedSEQ: "+ack+" < "+expectedSEQ);
 			return false;
 		}
 		else if ( windowSpareSpace() <= 0){
 			///do nothing
+			System.out.println("SRReceiver "+ID+" > "+"warning(startReceive): no spare entry left.");
 			return false;
 		}
 		else if ( matchSEQ( ack ) == -1 ){
 			//do nothing
+			System.out.println("SRReceiver "+ID+" > "+"error(startReceive): unexpected seq: "+ack+", expect: "+expectedSEQ);
 			return false;
 		}
 
 		//verify checksum
 		if ( !checksumVerify( tempBuffer ) ){
+			System.out.println("SRReceiver "+ID+" > "+"error(startReceive): packet corrupted.");
 			return false;
 		}
 
+		//simulate packet loss
+		if ( lossCnt == ack && lossSign ){
+			lossSign = false;
+			return false;
+		}
+		
 		//check whether it is the last packet
 		dataSize = packetSize - HEADER_SIZE;
 		if ( tempBuffer[1] == 1 ){
 			dataReady = true;
+			lastPacketSEQ = ack;
 			dataSize = tempBuffer[2];
 		}
 
@@ -73,17 +88,19 @@ public class SRReceiver {
 		for (int i=0; i<dataSize; i++){
 			temp[i] = tempBuffer[HEADER_SIZE + i];
 		}
+		System.out.println("SRReceiver "+ID+" > window seq status(before): "+windowSEQ[0]+" "+windowSEQ[1]+" "+windowSEQ[2]+" "+windowSEQ[3]);
 		pushToWindow( 0, 0, ack, temp );
 		//reorganize window
 		reorganizeWindow();
-
+		System.out.println("SRReceiver "+ID+" > window seq status(after): "+windowSEQ[0]+" "+windowSEQ[1]+" "+windowSEQ[2]+" "+windowSEQ[3]);
 		//sendACK
 		sendACK( ack );
+		System.out.println("SRReceiver "+ID+" > packet received, ACK sent, sequence number: "+ack);
 		return true;
 	}
 	
 	public boolean isReady(){
-		return dataReady;
+		return dataReady && notUnReceived();
 	}
 
 	public void terminate(){
@@ -108,7 +125,7 @@ public class SRReceiver {
 			out.print(recovered.get(j));
 		}
 		out.close();
-		System.out.println("SRReceiver"+ID+" > data has already written to " + filePath);
+		System.out.println("SRReceiver "+ID+" > data has already written to " + filePath);
 	}
 
 	public ArrayList<Character> getData(){
@@ -128,14 +145,21 @@ public class SRReceiver {
 		senderID = DEFAULT_SENDER_ID;
 		expectedSEQ = 0;
 		maxSeq = MAX_SEQ;
+		windowSize = DEFAULT_WINDOW_SIZE;
 		window = new WindowEntry[windowSize];
 		windowAvailbility = new boolean[windowSize];
 		windowSEQ = new int[windowSize];
 		ID = DEFAULT_ID;
-		windowSize = DEFAULT_WINDOW_SIZE;
+		lastPacketSEQ = -1;
+		lossCnt = 1;
+		lossSign = true;
+		
+		for (int i=0; i<window.length; i++){
+			window[i] = new WindowEntry();
+		}
 		
 		for (int i=0; i<windowAvailbility.length;i++){
-			windowAvailbility[i] = false;
+			windowAvailbility[i] = true;
 		}
 		initializeWSEQ(0);
 	}
@@ -153,24 +177,31 @@ public class SRReceiver {
 		writeIndex = 0;
 		expectedSEQ = 0;
 		maxSeq = seq;
+		windowSize = ws;
 		window = new WindowEntry[windowSize];
 		windowAvailbility = new boolean[windowSize];
 		windowSEQ = new int[windowSize];
-		windowSize = ws;
-
+		lastPacketSEQ = -1;
+		lossCnt = 1;
+		lossSign = true;
+		
+		for (int i=0; i<window.length; i++){
+			window[i] = new WindowEntry();
+		}
+		
 		for (int i=0; i<windowAvailbility.length;i++){
-			windowAvailbility[i] = false;
+			windowAvailbility[i] = true;
 		}
 		initializeWSEQ(0);
 	}
 
 	//Private Method
 	private void pushToWindow( int left, int right, int seq, byte[] incoming ){//may involve an insert-sort on sequence number
-		//window size check
-		if ( window.length >= windowSize){
+		/*
+		if (window.length>=windowSize){
 			return;
 		}
-		
+		*/
 		WindowEntry tempWE = new WindowEntry(left, right, seq);
 		ArrayList<Character> tempC = new ArrayList<Character>();
 		int index = 0;
@@ -181,26 +212,51 @@ public class SRReceiver {
 		}
 		tempWE.setBuffer( tempC );
 		index = getNoneOccupiedIndex(seq);
-
+		System.out.println("> "+index);
 		//push to window (sort on sequence number)
-		window[index] = tempWE;
-		windowAvailbility[index] = true;
+		window[index].set(tempWE);
+		windowAvailbility[index] = false;
+		System.out.println("SRReceiver "+ID+" > "+"(pushToWindow): packet: "+seq+" pushed to entry:"+index);
 	}
 	
 	private int getNoneOccupiedIndex( int incoming ){
+		//System.out.println("SRReceiver "+ID+" > "+"check point getNOIndex");
 		for (int i=0; i<window.length; i++){
-			if ( windowAvailbility[i] == false && window[i].seq == incoming){
+			if ( windowAvailbility[i] == true && windowSEQ[i] == incoming){
 				return i;
 			}
 		}
 		System.out.println("SRReceiver "+ID+" > error(getNonegetNoneOccupiedIndex): find no free entry corespond to seq: "+incoming);
 		return -1;
 	}
-
+	
+	private int getOccupiedIndex( int incoming ){
+		for ( int i=0; i< window.length; i++ ){
+			if ( windowAvailbility[i] == false && windowSEQ[i] == incoming ){
+				return i;
+			}
+		}
+		System.out.println("SRReceiver "+ID+" > error(getOccupiedIndex): find no free entry corespond to seq: "+incoming);
+		return -1;
+	}
+	
+	private boolean notUnReceived(){
+		if ( lastPacketSEQ == -1 ){
+			return false;
+		}
+		int lastPacketIndex = getOccupiedIndex( lastPacketSEQ );
+		for (int i=0; i<lastPacketIndex; i++){
+			if(windowAvailbility[i] == true){
+				return false;
+			}
+		}
+		return true;
+	}
+	
 	private int windowSpareSpace(){
 		int cnt =0;
 		for (int i=0; i<windowAvailbility.length; i++){
-			if ( windowAvailbility[i] == false )
+			if ( windowAvailbility[i] == true )
 				cnt++;
 		}
 		return cnt;
@@ -248,32 +304,52 @@ public class SRReceiver {
 		int range = 0;
 		for ( int i=0; i<windowSEQ.length; i++ ){
 			if ( windowAvailbility[i] == true){
-				range++;
+				break;
 			}
+			range++;
 		}
 		if( range == 0 ){//no packet ready
+			System.out.println("SRReceiver "+ID+" > "+"warning(reorganizeWindow): no continuous packet ready.");
 			return false;
 		}
-
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 1");
 		//read those entry
 		for (int i=0; i<range; i++){
 			for (int j=0; j<window[i].buffer.size(); j++){
 				receivedData.add( window[i].buffer.get(j) );
 			}
-			windowAvailbility[i] = false;
+			//windowAvailbility[i] = true;
 		}
-
-		//slide window(update expected sequence number)
-		expectedSEQ = windowSEQ[range];
-		for ( int i=0; i< window.length - range; i++){
-			window[i] = window[range+i];
-			windowAvailbility[i] = true;
-		}
-		for ( int j=range; j<window.length; j++ ){
-			windowAvailbility[j] = false;
-		}
-		initializeWSEQ( expectedSEQ );
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 2, range: "+range);
 		
+		//slide window(update expected sequence number)
+		if ( range < window.length ){
+			expectedSEQ = windowSEQ[range];
+		}
+		else {///range = window.length
+			expectedSEQ = nextSeqN(windowSEQ[window.length-1]);
+		}
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 3, new expectedSEQ: "+expectedSEQ+" window.Length: "+window.length);
+		//System.out.println("SRReceiver "+ID+" > checking window.");
+		/*
+		for(int j=0; j<window.length; j++){
+			System.out.print(j+"th ");
+			System.out.print(window[j].seq+" ");
+		}
+		*/
+		//System.out.println("SRReceiver "+ID+" > checking window complete.");
+		for ( int i=0; i< window.length - range; i++){
+			window[i].set(window[range+i].clone());
+			windowAvailbility[i] = windowAvailbility[range+i];
+			///System.out.println("SRReceiver "+ID+" > "+"check point reorag 3+, i: "+i);
+		}
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 4");
+		for ( int j=range; j<window.length; j++ ){
+			windowAvailbility[j] = true;
+		}
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 5");
+		initializeWSEQ( expectedSEQ );
+		System.out.println("SRReceiver "+ID+" > "+"check point reorag 6");
 		return true;
 	}
 
@@ -289,7 +365,11 @@ public class SRReceiver {
 			return -1;
 		}
 	}
-
+	
+	//Public Variable
+	public int lossCnt;
+	public boolean lossSign;
+	
 	//Private Variable
 	private int desPort;
 	private InetAddress desAddr;
@@ -308,4 +388,5 @@ public class SRReceiver {
 	private int ID;
 	private int senderID;
 	private int windowSize;
+	private int lastPacketSEQ;
 }

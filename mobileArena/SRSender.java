@@ -46,7 +46,7 @@ public class SRSender {
 			}
 			tempRange = (( dataSent.length - sendIndex ) > ( packetSize - headerSize ) )? ( packetSize - headerSize ): ( dataSent.length - sendIndex );
 			//transmit
-			transmitPacket( sendIndex, sendIndex+tempRange );
+			transmitPacket( sendIndex, sendIndex+tempRange, nextSeqN() );
 			//push to window
 			pushEntry(sendIndex, sendIndex+tempRange);
 
@@ -85,7 +85,7 @@ public class SRSender {
 			System.out.println("SRSender "+senderID+" > "+"error(receivePacket):invalid sequence number:" + incomingSeq);
 			return 0;
 		}
-
+		System.out.println("SRSender "+senderID+" > ACK received, sequence number: "+incomingSeq);
 		return 1;
 	}
 
@@ -103,8 +103,15 @@ public class SRSender {
 		}
 
 		//slide window
-		window = (ArrayList<WindowEntry>) window.subList(slideLength, window.size()-1);
-		
+		ArrayList<WindowEntry> tempList = new ArrayList<WindowEntry>();
+		tempList.clear();
+		//window = (ArrayList<WindowEntry>) window.subList(slideLength, window.size()-1);
+		for (int i=slideLength; i<window.size(); i++){
+			tempList.add(window.get(i).clone());
+		}
+		window.clear();
+		window = tempList;
+		System.out.println("SRSender "+senderID+" > slide "+slideLength+", current widow size: "+window.size());
 		return slideLength;
 	}
 
@@ -123,7 +130,7 @@ public class SRSender {
 		for ( int j=0; j<window.size(); j++ ){
 			if (window.get(j).counter > DEFAULT_COUNTER_BOUND && window.get(j).acked == false){//retransmit this packet
 				reTransmit( j );
-				System.out.println("SRSender "+senderID+" > "+"retransmit< "+window.get(j).indexS+", "+window.get(j).indexE+">");
+				System.out.println("SRSender "+senderID+" > "+"retransmit< "+window.get(j).indexS+", "+(window.get(j).indexE-1)+">");
 			}
 		}
 		return;
@@ -155,6 +162,7 @@ public class SRSender {
 		senderID = id;
 		desPort = desPortal;
 		desAddr = InetAddress.getByName( address );
+		sender = new DatagramSocket();
 		sequenceN = 0;
 		maxSeqN = seqN;
 		sendIndex = 0;
@@ -164,9 +172,9 @@ public class SRSender {
 	}
 
 	//Private Method
-	private boolean transmitPacket( int indexS,  int indexE ) throws IOException{//transmit the data in dataSent from indexS to indexE in one packet
-		//boundary-check
-		if (  indexS >= indexE || indexS >=  dataSent.length || indexE >= dataSent.length){
+	private boolean transmitPacket( int indexS,  int indexE, int sequence  ) throws IOException{//transmit the data in dataSent from indexS to indexE in one packet
+		//boundary-check																		//[indexS, indexE)
+		if (  indexS >= indexE || indexS >=  dataSent.length || indexE > dataSent.length){
 			System.out.println("SRSender "+senderID+" > "+"error(transmitPacket): invalid input range( "+indexS+", "+indexE+" )");
 			return false;
 		}
@@ -179,7 +187,7 @@ public class SRSender {
 		int range=0;
 		////construct head
 		sendBuffer[0] = 'D';
-		sendBuffer[4] = (byte) nextSeqN();
+		sendBuffer[4] = (byte) sequence;
 		sendBuffer[3] = (byte) senderID;
 		if ( indexE == dataSent.length ){//last packet to send
 			sendBuffer[1] = 1;
@@ -200,6 +208,7 @@ public class SRSender {
 		//send
 		DatagramPacket toSend = new DatagramPacket( sendBuffer, 0,  sendBuffer.length,  desAddr, desPort);
 		sender.send( toSend );
+		System.out.println("SRSender "+senderID+" > packet sent < "+indexS+", "+(indexE-1)+" >");
 		return true;
 	}
 	
@@ -220,7 +229,7 @@ public class SRSender {
 		
 		//retransmit
 		boolean flag = false;
-		flag = transmitPacket( window.get(index).indexS, window.get(index).indexE );
+		flag = transmitPacket( window.get(index).indexS, window.get(index).indexE, window.get(index).seq );
 		//reset counter
 		window.get(index).counter = 0;
 		window.get(index).acked = false;
@@ -247,7 +256,14 @@ public class SRSender {
 	}
 
 	private int currentSeqN(){
-		
+		if ( sequenceN > 0 && sequenceN <= maxSeqN ){
+			return sequenceN-1;
+		}
+		else if ( sequenceN == 0 ){
+			return maxSeqN;
+		}
+		System.out.println("SRSender "+senderID+" > "+"error(currentSeqN): invalid sequence number spotted: " + sequenceN);
+		return -1;
 	}
 
 	//Private Variable

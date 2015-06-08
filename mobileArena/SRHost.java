@@ -14,7 +14,7 @@ import java.net.*;
 
 public class SRHost implements Runnable{
 	//Status Values
-	private static final int DEFAULT_TIMEOUT = 2000;
+	private static final int DEFAULT_TIMEOUT = 5000;
 	private static final int MAX_SEQ = 10;
 
 	//Public Method
@@ -24,16 +24,19 @@ public class SRHost implements Runnable{
 		boolean timeout = false;;
 		int state = 1;
 		int temp = 0;
+		int slideLength = 0;
 		boolean temp_ = false;
-		DatagramPacket temPacket = null;
+		byte[] receiveBuffer = new byte[packetSize];
+		DatagramPacket temPacket = new DatagramPacket(receiveBuffer, 0, receiveBuffer.length);
 		do{
 			try{
 				switch(state){
 				case 1:
 					flagS = sender.transmit();
+					state = 2;
+					break;
 				case 2:
 					listener.setSoTimeout(DEFAULT_TIMEOUT);
-					temPacket = null;
 					timeout = false;
 					try{
 						listener.receive( temPacket );
@@ -48,19 +51,22 @@ public class SRHost implements Runnable{
 						//...
 						state = 2;
 						timeout = false;
-						continue;
+						break;
 					}
 					else {
 						temp = sender.receivePacket( temPacket );
+						//System.out.println("Host "+hostID+" > temp: "+temp);
 						if (  temp == 1){
-							sender.windowSlide();
+							slideLength = sender.windowSlide();
 							state = 1;
-							continue;
+							//System.out.println("Host "+hostID+" > window slide: "+slideLength);
+							break;
 						}
+						System.out.println("Host "+hostID+" > receiving");
 						temp_ = receiver.startReceive( temPacket );
+						//System.out.println("Host "+hostID+" > temp_: "+temp_);
 						state = 2;
-						if (  temp_ == true ){
-							receiver.terminate();
+						if (  receiver.isReady() ){
 							flagR = true;
 						}
 					}
@@ -68,13 +74,14 @@ public class SRHost implements Runnable{
 					break;
 				}
 			}catch( Exception e ){
-					System.out.println("Host "+hostID+" > exception occurs");
+					System.out.println("Host "+hostID+" > exception occurs:"+e.getLocalizedMessage());
 					sender.terminate();
 					receiver.terminate();
 					return;
 			}
 		}while(flagS != true || flagR != true);
 		
+		receiver.writeToDisk();
 		sender.terminate();
 		receiver.terminate();
 		System.out.println("Host "+hostID+" > Mission complete thus terminated");
@@ -87,13 +94,15 @@ public class SRHost implements Runnable{
 
 	}
 
-	public SRHost( String id, String desA, int desPs, int desPr, int localPs, int localPr, int pSize, byte[] data, String path ) throws UnknownHostException, SocketException{
+	public SRHost( String id, String desA, int desP, int localP, int pSize, byte[] data, String path, int senderID, int desID, int receiverID ) throws UnknownHostException, SocketException{
 		hostID = id;
-		sender = new SRSender(desA, desPs, data, pSize, 1, MAX_SEQ);
-		receiver = new SRReceiver(desA, desPr,  pSize, path,1, 2, MAX_SEQ, 4);
+		sender = new SRSender(desA, desP, data, pSize, senderID, MAX_SEQ);
+		receiver = new SRReceiver(desA, desP,  pSize, path, desID, receiverID, MAX_SEQ, 4/*windowSize*/);
 		dataReceived = new ArrayList<Character>();
 		dataTosend = data;
-		listener = new DatagramSocket();
+		listener = new DatagramSocket( localP );
+		System.out.println("SRHost "+id+" > listener port: "+localP);
+		packetSize = pSize;
 	}
 
 	//Private  Method
@@ -107,4 +116,5 @@ public class SRHost implements Runnable{
 	private DatagramSocket listener; 
 	private byte[] dataTosend;
 	private ArrayList<Character> dataReceived;
+	private int packetSize;
 }

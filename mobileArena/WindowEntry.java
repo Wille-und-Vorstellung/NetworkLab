@@ -29,6 +29,20 @@ public class WindowEntry {
 		seq = iseq;
 	}
 	
+	public WindowEntry clone(){
+		WindowEntry temp = new WindowEntry(this.indexS, this.indexE, this.seq);
+		return temp;
+	}
+	
+	public void set( WindowEntry incoming ){
+		this.indexS = incoming.indexS;
+		this.indexE = incoming.indexE;
+		this.counter = incoming.counter;
+		this.acked = incoming.acked;
+		this.seq = incoming.seq;
+		this.buffer = incoming.buffer;
+	}
+	
 	//Public Variable
 	public int indexS;
 	public int indexE;

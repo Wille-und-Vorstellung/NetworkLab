@@ -15,7 +15,7 @@ public class VirtualNet {
 	//main entrance
 	public static void main( String arg [] ){
 		VirtualNet test01 = new VirtualNet();
-		int mod =2;
+		int mod =3;
 		try {
 			test01.start(mod);
 		} catch (UnknownHostException | SocketException | FileNotFoundException e) {
@@ -28,6 +28,21 @@ public class VirtualNet {
 
 	//Method
 	public int start( int mod ) throws UnknownHostException, SocketException, FileNotFoundException{
+		//data for mod 2 and 3 
+		byte[] aTob = new byte[63];
+		byte[] bToa = new byte[63];
+		
+		System.out.println("Reading input file on disk.");
+		Scanner alice = new Scanner( new File(  "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\AliceToBob.txt" ) );
+		Scanner bob = new Scanner( new File(  "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\BobToAlice.txt" ) );
+		String temp_=null, temp=null;
+		temp = alice.nextLine();
+		temp_ = bob.nextLine();
+		for (int i=0; i<63; i++){
+			aTob[i] = (byte)temp.charAt(i);
+			bToa[i] = (byte)temp_.charAt(i);
+		}
+		
 		switch(mod){
 		case 1://stage one : unidirectional transfer
 			//construct data 
@@ -58,35 +73,6 @@ public class VirtualNet {
 			receiverThread.start();
 			break;
 		case 2:
-			// get some data
-			byte[] aTob = new byte[63];
-			byte[] bToa = new byte[63];
-			/*
-			System.out.println("Alice to Bob:");
-			for (int i=0; i<aTob.length; i++){
-				aTob[i] = (byte) ('a');
-				System.out.print((char)aTob[i]);
-			}
-			System.out.println();
-			System.out.println("Bob to Alice:");
-			for ( int j=0; j<bToa.length; j++ ){
-				bToa[j] = (byte) ('b');
-				System.out.print((char)bToa[j]);
-			}
-			System.out.println();
-			System.out.println("--------------------------------------");			
-			*/
-			System.out.println("Reading input file on disk.");
-			Scanner alice = new Scanner( new File(  "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\AliceToBob.txt" ) );
-			Scanner bob = new Scanner( new File(  "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\BobToAlice.txt" ) );
-			String temp_=null, temp=null;
-			temp = alice.nextLine();
-			temp_ = bob.nextLine();
-			for (int i=0; i<63; i++){
-				aTob[i] = (byte)temp.charAt(i);
-				bToa[i] = (byte)temp_.charAt(i);
-			}
-			
 			//stage two :bidirectional transfer
 			UDPHost hostAlice = new UDPHost( "Alice", "127.0.0.1", 2048, 2049, 2072, 2073, 20, aTob, "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\fromBob.txt" );
 			UDPHost hostBob = new UDPHost( "Bob", "127.0.0.1", 2073, 2072, 2049, 2048, 20, bToa,  "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\fromAlice.txt");
@@ -95,6 +81,18 @@ public class VirtualNet {
 
 			threadAlice.start();
 			threadBob.start();
+			break;
+			
+		case 3://SR test
+		//public SRHost( String id, String desA, int desPs, int desPr, int localP, int pSize, byte[] data, String path int senderID, int desID, int receiverID)
+			SRHost srHostAlice = new SRHost("Alice", "127.0.0.1", 2048, 2072, 20, aTob, "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\fromBobSR.txt", 1, 2, 1);
+			SRHost srHostBob = new SRHost("Bob", "127.0.0.1", 2072, 2048, 20, bToa, "D:\\ProgrammingProjects\\Eclipse_Java\\NetworkLab2\\fromAliceSR.txt", 2, 1, 2);
+			Thread threadAliceSR = new Thread( srHostAlice );
+			Thread threadBobSR = new Thread( srHostBob );
+			
+			threadAliceSR.start();
+			threadBobSR.start();
+			
 			break;
 		default:
 			System.out.println("Wrong Mode number.");
